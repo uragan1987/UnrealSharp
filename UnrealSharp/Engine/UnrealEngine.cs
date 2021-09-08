@@ -126,15 +126,17 @@ namespace UnrealSharp
             }
             {
                 GWorldPtrPattern = (UInt64)Memory.FindPattern("48 8B 1D ? ? ? ? 48 85 DB 74 3B 41 B0 01");
-                GObjectsPattern = (UInt64)Memory.FindPattern("C1 F9 10 48 63 C9 48 8D 14 40 48 8B 05");
-                //DumpGNames();
-
+                GObjectsPattern = (UInt64)Memory.FindPattern("48 8D 0D ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? 48 8B D6 48 89 B5");
+                DumpGNames();
                 var offset = UnrealEngine.Memory.ReadProcessMemory<UInt32>(GWorldPtrPattern + 3);
-                GWorldPtr = GWorldPtrPattern + offset + 7;
+                GWorldPtr = GWorldPtrPattern + offset + 0x7;
+
+                offset = Memory.ReadProcessMemory<UInt32>(GObjectsPattern + 3);
+                GObjects = GObjectsPattern + offset + 0x7 + 0x10;
+
                 UpdateUEObject();
 
-                offset = Memory.ReadProcessMemory<UInt32>(GObjectsPattern + 13);
-                GObjects = GObjectsPattern + offset + 17 - Memory.BaseAddress;
+
             }
             {
                 GEnginePattern = (UInt64)Memory.FindPattern("48 8B 0D ?? ?? ?? ?? 48 85 C9 74 1E 48 8B 01 FF 90");
@@ -154,6 +156,9 @@ namespace UnrealSharp
                 // Actors, StreamedLevelOwningWorld, Owning World
                 ActorListOffset = owningWorldOffset - 0x10;
             }
+
+            EnableConsole();
+
             //DumpSdk();
         }
         public void EnableConsole()
@@ -178,8 +183,8 @@ namespace UnrealSharp
                         var name = UEObject.GetName(classNameIndex);
                         if (name == "World")
                         {
-                            UEObject.classOffset = c;
-                            UEObject.nameOffset = n;
+                            UEObject.classOffset = c; //0x10
+                            UEObject.nameOffset = n;  //0x18
                             foundClassAndName = true;
                         }
                     }
@@ -196,7 +201,7 @@ namespace UnrealSharp
                     var name = UEObject.GetName(classNameIndex);
                     if (name == "/Script/Engine")
                     {
-                        UEObject.objectOuterOffset = o;
+                        UEObject.objectOuterOffset = o; //0x20
                         foundOuter = true;
                         break;
                     }
@@ -206,14 +211,14 @@ namespace UnrealSharp
             {
                 var foundSuper = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
-                for (var o = 0u; o < 0x50; o += 0x8)
+                for (var o = 0u; o < 0x150; o += 0x8)
                 {
                     var superObj = Memory.ReadProcessMemory<UInt64>(classPtr + o);
                     var classNameIndex = Memory.ReadProcessMemory<Int32>(superObj + UEObject.nameOffset);
                     var name = UEObject.GetName(classNameIndex);
                     if (name == "Object")
                     {
-                        UEObject.structSuperOffset = o;
+                        UEObject.structSuperOffset = o; //A8
                         foundSuper = true;
                         break;
                     }
@@ -223,7 +228,7 @@ namespace UnrealSharp
             {
                 var foundChildsAndFieldName = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
-                for (var c = 0u; c < 0x80 && !foundChildsAndFieldName; c += 0x8)
+                for (var c = 0u; c < 0x180 && !foundChildsAndFieldName; c += 0x8)
                 {
                     var childPtr = Memory.ReadProcessMemory<UInt64>(classPtr + c);
                     if (childPtr == 0x0) continue;
@@ -233,8 +238,8 @@ namespace UnrealSharp
                         var name = UEObject.GetName(classNameIndex);
                         if (name == "PersistentLevel")
                         {
-                            UEObject.childPropertiesOffset = c;
-                            UEObject.fieldNameOffset = n;
+                            UEObject.childPropertiesOffset = c; //0xB0
+                            UEObject.fieldNameOffset = n;       //0x18
                             foundChildsAndFieldName = true;
                         }
                     }
@@ -245,7 +250,7 @@ namespace UnrealSharp
                 var foundNextField = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
                 var fieldPtr = Memory.ReadProcessMemory<UInt64>(classPtr + UEObject.childPropertiesOffset);
-                for (var c = 0u; c < 0x80 && !foundNextField; c += 0x8)
+                for (var c = 0u; c < 0x180 && !foundNextField; c += 0x8)
                 {
                     var childClassPtr = Memory.ReadProcessMemory<UInt64>(fieldPtr + c);
                     if (childClassPtr == 0x0) continue;
@@ -253,7 +258,7 @@ namespace UnrealSharp
                     var name = UEObject.GetName(classNameIndex);
                     if (name == "NetDriver")
                     {
-                        UEObject.fieldNextOffset = c;
+                        UEObject.fieldNextOffset = c;   //0xA0
                         foundNextField = true;
                     }
                 }
@@ -262,7 +267,7 @@ namespace UnrealSharp
             {
                 var foundFuncs = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
-                for (var c = 0u; c < 0x80 && !foundFuncs; c += 0x8)
+                for (var c = 0u; c < 0xA80 && !foundFuncs; c += 0x8)
                 {
                     var childPtr = Memory.ReadProcessMemory<UInt64>(classPtr + c);
                     if (childPtr == 0x0) continue;
@@ -277,7 +282,7 @@ namespace UnrealSharp
                 if (!foundFuncs)
                 {
                     var testObj = new UEObject(world);
-                    var isField = testObj["K2_GetWorldSettings"];
+                    var isField = testObj["PersistentLevel"];
                     if (isField != null)
                     {
                         UEObject.childrenOffset = UEObject.childPropertiesOffset;
@@ -286,6 +291,7 @@ namespace UnrealSharp
                 }
                 if (!foundFuncs) throw new Exception("bad childs offset");
             }
+            /**
             {
                 var foundNextField = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
@@ -304,11 +310,12 @@ namespace UnrealSharp
                 }
                 if (!foundNextField) throw new Exception("bad next offset");
             }
+            **/
             {
                 var foundNextField = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
                 var fieldPtr = Memory.ReadProcessMemory<UInt64>(classPtr + UEObject.childPropertiesOffset);
-                for (var c = 0u; c < 0x80 && !foundNextField; c += 0x8)
+                for (var c = 0u; c < 0x180 && !foundNextField; c += 0x8)
                 {
                     var childClassPtr = Memory.ReadProcessMemory<UInt64>(fieldPtr + c);
                     if (childClassPtr == 0x0) continue;
@@ -317,7 +324,7 @@ namespace UnrealSharp
                     var name = UEObject.GetName(classNameIndex);
                     if (name == "ObjectProperty")
                     {
-                        UEObject.fieldClassOffset = c;
+                        UEObject.fieldClassOffset = c; //0x10
                         foundNextField = true;
                     }
                 }
@@ -327,19 +334,20 @@ namespace UnrealSharp
                 var foundFieldOffset = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
                 var fieldPtr = Memory.ReadProcessMemory<UInt64>(classPtr + UEObject.childPropertiesOffset);
-                for (var c = 0x0u; c < 0x80 && !foundFieldOffset; c += 0x4)
+                for (var c = 0x0u; c < 0x180 && !foundFieldOffset; c += 0x4)
                 {
                     var fieldOffset = Memory.ReadProcessMemory<UInt64>(fieldPtr + c);
                     var nextFieldPtr = Memory.ReadProcessMemory<UInt64>(fieldPtr + UEObject.fieldNextOffset);
                     var fieldOffsetPlus8 = Memory.ReadProcessMemory<UInt64>(nextFieldPtr + c);
                     if ((fieldOffset + 8) == fieldOffsetPlus8)
                     {
-                        UEObject.fieldOffset = c;
+                        UEObject.fieldOffset = c;   //0xBC
                         foundFieldOffset = true;
                     }
                 }
                 if (!foundFieldOffset) throw new Exception("bad field offset");
             }
+            /**
             {
                 var World = new UEObject(world);
                 var field = World.GetFieldAddr("StreamingLevelsToConsider");
@@ -357,6 +365,7 @@ namespace UnrealSharp
                 }
                 if (!foundPropertySize) throw new Exception("bad property size offset");
             }
+            **/
             {
                 var vTable = UnrealEngine.Memory.ReadProcessMemory<UInt64>(world);
                 var foundProcessEventOffset = false;
@@ -372,6 +381,7 @@ namespace UnrealSharp
                 }
                 if (!foundProcessEventOffset) throw new Exception("bad process event offset");
             }
+            /**
             {
                 var testObj = new UEObject(world);
                 var funcAddr = testObj.GetFuncAddr(testObj.ClassAddr, testObj.ClassAddr, "K2_GetWorldSettings");
@@ -387,6 +397,7 @@ namespace UnrealSharp
                 }
                 if (!foundFuncFlags) throw new Exception("bad func flags offset");
             }
+            **/
         }
         public void DumpGNames()
         {
@@ -395,10 +406,15 @@ namespace UnrealSharp
             var i = 0;
             while (true)
             {
+                
                 var name = UEObject.GetName(i);
                 if (name == "badIndex") break;
-                sb.AppendLine("[" + i + " / " + (i).ToString("X") + "] " + name);
-                i += name.Length / 2 + name.Length % 2 + 1;
+                if (name == "") { i++; continue; }
+                sb.AppendLine(String.Format("[{0,6} / {1,6}] {2}", i, (i).ToString("X"), name));
+                //sb.AppendLine("[" + i + " / " + (i).ToString("X") + "] " + name);
+                i++;
+                //i += name.Length / 2 + name.Length % 2 + 1;
+                if (i > 500000) break;
             }
             System.IO.Directory.CreateDirectory(Memory.Process.ProcessName);
             System.IO.File.WriteAllText(Memory.Process.ProcessName + @"\GNamesDump.txt", sb.ToString());
@@ -936,6 +952,7 @@ namespace UnrealSharp
         public static String GetNameOld(Int32 i)
         {
             var fNamePtr = UnrealEngine.Memory.ReadProcessMemory<ulong>(UnrealEngine.GNames + ((UInt64)i / 0x4000) * 8);
+            if (fNamePtr == 0) return "badIndex";
             var fName2 = UnrealEngine.Memory.ReadProcessMemory<ulong>(fNamePtr + (8 * ((UInt64)i % 0x4000)));
             var fName3 = UnrealEngine.Memory.ReadProcessMemory<String>(fName2 + 0x10);   //FIX1: TODO: 0xc  == x32Process?
             return fName3;
