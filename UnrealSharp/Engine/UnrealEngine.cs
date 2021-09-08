@@ -127,7 +127,7 @@ namespace UnrealSharp
             {
                 GWorldPtrPattern = (UInt64)Memory.FindPattern("48 8B 1D ? ? ? ? 48 85 DB 74 3B 41 B0 01");
                 GObjectsPattern = (UInt64)Memory.FindPattern("48 8D 0D ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? 48 8B D6 48 89 B5");
-                DumpGNames();
+                //DumpGNames();
                 var offset = UnrealEngine.Memory.ReadProcessMemory<UInt32>(GWorldPtrPattern + 3);
                 GWorldPtr = GWorldPtrPattern + offset + 0x7;
 
@@ -157,7 +157,7 @@ namespace UnrealSharp
                 ActorListOffset = owningWorldOffset - 0x10;
             }
 
-            EnableConsole();
+            //EnableConsole();
 
             //DumpSdk();
         }
