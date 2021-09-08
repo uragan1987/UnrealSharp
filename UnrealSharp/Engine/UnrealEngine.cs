@@ -98,6 +98,19 @@ namespace UnrealSharp
                 if (GNamesPattern == 0)
                 {
                     UEObject.NewFName = false;
+                    /*
+                    00007FF7E11B426D | CC | INT3 |
+                    00007FF7E11B426E | CC | INT3 |
+                    00007FF7E11B426F | CC | INT3 |
+                    00007FF7E11B4270 | 48:83EC 28 | SUB RSP,28 |
+                    00007FF7E11B4274 | 48:8B05 CD215C07            | MOV RAX,QWORD PTR DS:[7FF7E8776448]          | createGname
+                    00007FF7E11B427B | 48:85C0 | TEST RAX,RAX |
+                    00007FF7E11B427E | 75 5F | JNE bless.7FF7E11B42DF |
+                    00007FF7E11B4280 | B9 08040000 | MOV ECX,408 |
+                    00007FF7E11B4285 | 48:895C24 20 | MOV QWORD PTR SS:[RSP+20],RBX |
+                    00007FF7E11B428A | E8 C1412FFF | CALL bless.7FF7E04A8450 |
+                    00007FF7E11B428F | 48:8BD8 | MOV RBX,RAX |
+                    */
                     GNamesPattern = (UInt64)Memory.FindPattern("48 8B 05 ? ? ? ? 48 85 C0 75 5F");
                     var offset = Memory.ReadProcessMemory<UInt32>(GNamesPattern + 3);
                     GNames = Memory.ReadProcessMemory<UInt64>(GNamesPattern + offset + 7);
@@ -924,7 +937,7 @@ namespace UnrealSharp
         {
             var fNamePtr = UnrealEngine.Memory.ReadProcessMemory<ulong>(UnrealEngine.GNames + ((UInt64)i / 0x4000) * 8);
             var fName2 = UnrealEngine.Memory.ReadProcessMemory<ulong>(fNamePtr + (8 * ((UInt64)i % 0x4000)));
-            var fName3 = UnrealEngine.Memory.ReadProcessMemory<String>(fName2 + 0xc);
+            var fName3 = UnrealEngine.Memory.ReadProcessMemory<String>(fName2 + 0x10);   //FIX1: TODO: 0xc  == x32Process?
             return fName3;
         }
         public String GetShortName()
