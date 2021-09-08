@@ -125,6 +125,11 @@ namespace UnrealSharp
                 }
             }
             {
+                GEnginePattern = (UInt64)Memory.FindPattern("48 8B 0D ?? ?? ?? ?? 48 85 C9 74 1E 48 8B 01 FF 90");
+                var offset = Memory.ReadProcessMemory<UInt32>(GEnginePattern + 3);
+                GEngine = Memory.ReadProcessMemory<UInt64>(GEnginePattern + offset + 7);
+            }
+            {
                 GWorldPtrPattern = (UInt64)Memory.FindPattern("48 8B 1D ? ? ? ? 48 85 DB 74 3B 41 B0 01");
                 GObjectsPattern = (UInt64)Memory.FindPattern("48 8D 0D ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? 48 8B D6 48 89 B5");
                 //DumpGNames();
@@ -139,11 +144,6 @@ namespace UnrealSharp
 
             }
             {
-                GEnginePattern = (UInt64)Memory.FindPattern("48 8B 0D ?? ?? ?? ?? 48 85 C9 74 1E 48 8B 01 FF 90");
-                var offset = Memory.ReadProcessMemory<UInt32>(GEnginePattern + 3);
-                GEngine = Memory.ReadProcessMemory<UInt64>(GEnginePattern + offset + 7);
-            }
-            {
                 var engine = new UEObject(GEngine);
                 GStaticCtor = (UInt64)Memory.FindPattern("4C 89 44 24 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4");
             }
@@ -156,10 +156,21 @@ namespace UnrealSharp
                 // Actors, StreamedLevelOwningWorld, Owning World
                 ActorListOffset = owningWorldOffset - 0x10;
             }
+            {
+                var engine = new UEObject(GEngine);
+                var gameUserSettings = engine["GameUserSettings"];
+                float fps = 10;
+                gameUserSettings.Invoke("SetFullscreenMode", 1);
+
+
+                
+            }
+
 
             //EnableConsole();
 
-            //DumpSdk();
+            DumpSdk();
+            
         }
         public void EnableConsole()
         {
@@ -267,15 +278,18 @@ namespace UnrealSharp
             {
                 var foundFuncs = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
-                for (var c = 0u; c < 0xA80 && !foundFuncs; c += 0x8)
+                var navigationSystemPtr = Memory.ReadProcessMemory<UInt64>(world + 0x0160); //TODO hardcoded
+                classPtr = Memory.ReadProcessMemory<UInt64>(navigationSystemPtr + UEObject.classOffset);
+
+                for (var c = 0u; c < 0xF80 && !foundFuncs; c += 0x8)
                 {
                     var childPtr = Memory.ReadProcessMemory<UInt64>(classPtr + c);
                     if (childPtr == 0x0) continue;
-                    var classNameIndex = Memory.ReadProcessMemory<Int32>(childPtr + UEObject.nameOffset);
+                    var classNameIndex = Memory.ReadProcessMemory<Int32>(childPtr + (UEObject.NewFName ? UEObject.nameOffset : 0));
                     var name = UEObject.GetName(classNameIndex);
-                    if (name == "K2_GetWorldSettings")
+                    if (name == "FindPathToActorSynchronously")
                     {
-                        UEObject.childrenOffset = c;
+                        UEObject.childrenOffset = c;    //0x178
                         foundFuncs = true;
                     }
                 }
@@ -291,10 +305,12 @@ namespace UnrealSharp
                 }
                 if (!foundFuncs) throw new Exception("bad childs offset");
             }
-            /**
+            
             {
                 var foundNextField = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
+                var navigationSystemPtr = Memory.ReadProcessMemory<UInt64>(world + 0x0160);  //TODO hardcoded
+                classPtr = Memory.ReadProcessMemory<UInt64>(navigationSystemPtr + UEObject.classOffset);
                 var fieldPtr = Memory.ReadProcessMemory<UInt64>(classPtr + UEObject.childrenOffset);
                 for (var c = 0u; c < 0x80 && !foundNextField; c += 0x8)
                 {
@@ -302,15 +318,14 @@ namespace UnrealSharp
                     if (childClassPtr == 0x0) continue;
                     var classNameIndex = Memory.ReadProcessMemory<Int32>(childClassPtr + UEObject.nameOffset);
                     var name = UEObject.GetName(classNameIndex);
-                    if (name == "HandleTimelineScrubbed")
+                    if (name == "FindPathToLocationSynchronously")
                     {
-                        UEObject.funcNextOffset = c;
+                        UEObject.funcNextOffset = c;    //0x20
                         foundNextField = true;
                     }
                 }
                 if (!foundNextField) throw new Exception("bad next offset");
             }
-            **/
             {
                 var foundNextField = false;
                 var classPtr = Memory.ReadProcessMemory<UInt64>(world + UEObject.classOffset);
@@ -347,25 +362,28 @@ namespace UnrealSharp
                 }
                 if (!foundFieldOffset) throw new Exception("bad field offset");
             }
-            /**
+            
             {
                 var World = new UEObject(world);
                 var field = World.GetFieldAddr("StreamingLevelsToConsider");
+                var navigationSystemPtr = Memory.ReadProcessMemory<UInt64>(world + 0x0160);  //TODO hardcoded
+                var NavigationSystem = new UEObject(navigationSystemPtr);
+                field = NavigationSystem.GetFieldAddr("UnregisterNavigationInvoker");
                 var foundPropertySize = false;
                 for (var c = 0x60u; c < 0x100 && !foundPropertySize; c += 0x8)
                 {
                     var classAddr = Memory.ReadProcessMemory<UInt64>(field + c);
                     var classNameIndex = Memory.ReadProcessMemory<Int32>(classAddr + UEObject.nameOffset);
                     var name = UEObject.GetName(classNameIndex);
-                    if (name == "StreamingLevelsToConsider")
+                    if (name == "SimpleMoveToLocation")
                     {
-                        UEObject.propertySize = c;
+                        UEObject.propertySize = c;      //0xA0
                         foundPropertySize = true;
                     }
                 }
                 if (!foundPropertySize) throw new Exception("bad property size offset");
             }
-            **/
+            
             {
                 var vTable = UnrealEngine.Memory.ReadProcessMemory<UInt64>(world);
                 var foundProcessEventOffset = false;
@@ -375,29 +393,33 @@ namespace UnrealSharp
                     var sig = (UInt64)UnrealEngine.Memory.FindPattern("40 55 56 57 41 54 41 55 41 56 41 57", s, 0X20);
                     if (sig != 0)
                     {
-                        UEObject.vTableFuncNum = i;
+                        UEObject.vTableFuncNum = i;     //0x37
                         foundProcessEventOffset = true;
                     }
                 }
                 if (!foundProcessEventOffset) throw new Exception("bad process event offset");
             }
-            /**
+            
             {
                 var testObj = new UEObject(world);
                 var funcAddr = testObj.GetFuncAddr(testObj.ClassAddr, testObj.ClassAddr, "K2_GetWorldSettings");
+
+                var engine = new UEObject(GEngine);
+                var gameUserSettings = engine["GameUserSettings"];
+                funcAddr = gameUserSettings.GetFuncAddr(gameUserSettings.ClassAddr, gameUserSettings.ClassAddr, "GetFrameRateLimit");
                 var foundFuncFlags = false;
                 for (var i = 0u; i < 0x200 && !foundFuncFlags; i += 8)
                 {
                     var flags = UnrealEngine.Memory.ReadProcessMemory<UInt64>(funcAddr + i);
-                    if (flags == 0x0008000104020401)
+                    if (flags == 0x0008000104020401 || flags == 0x0004000154020401)
                     {
-                        UEObject.funcFlagsOffset = i;
+                        UEObject.funcFlagsOffset = i;       //0x100
                         foundFuncFlags = true;
                     }
                 }
                 if (!foundFuncFlags) throw new Exception("bad func flags offset");
             }
-            **/
+            
         }
         public void DumpGNames()
         {
@@ -821,21 +843,21 @@ namespace UnrealSharp
     }
     public class UEObject
     {
-        public static UInt32 objectOuterOffset = 0x20;
-        public static UInt32 classOffset = 0x10;
-        public static UInt32 nameOffset = 0x18;
-        public static UInt32 structSuperOffset = 0x40;
-        public static UInt32 childPropertiesOffset = 0x50;
-        public static UInt32 childrenOffset = 0x48;
-        public static UInt32 fieldNameOffset = 0x28;
-        public static UInt32 fieldTypeNameOffset = 0;
-        public static UInt32 fieldClassOffset = 0x8;
-        public static UInt32 fieldNextOffset = 0x20;
-        public static UInt32 funcNextOffset = 0x20;
-        public static UInt32 fieldOffset = 0x4C;
-        public static UInt32 propertySize = 0x78;
-        public static UInt32 vTableFuncNum = 66;
-        public static UInt32 funcFlagsOffset = 0xB0;
+        public static UInt32 objectOuterOffset = 0x20;      //0x20
+        public static UInt32 classOffset = 0x10;            //0x10
+        public static UInt32 nameOffset = 0x18;             //0x18
+        public static UInt32 structSuperOffset = 0x40;      //0xA8
+        public static UInt32 childPropertiesOffset = 0x50;  //0xB0
+        public static UInt32 childrenOffset = 0x48;         //0x178
+        public static UInt32 fieldNameOffset = 0x28;        //0x18
+        public static UInt32 fieldTypeNameOffset = 0;       //not used
+        public static UInt32 fieldClassOffset = 0x8;        //0x10
+        public static UInt32 fieldNextOffset = 0x20;        //0xA0
+        public static UInt32 funcNextOffset = 0x20;         //0x20
+        public static UInt32 fieldOffset = 0x4C;            //0xBC
+        public static UInt32 propertySize = 0x78;           //0xA0
+        public static UInt32 vTableFuncNum = 66;            //0x37
+        public static UInt32 funcFlagsOffset = 0xB0;        //0x100
         public static UInt32 enumArrayOffset = 0x40;
         public static UInt32 enumCountOffset = 0x48;
 
