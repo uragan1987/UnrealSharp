@@ -159,17 +159,15 @@ namespace UnrealSharp
             {
                 var engine = new UEObject(GEngine);
                 var gameUserSettings = engine["GameUserSettings"];
-                float fps = 10;
-                gameUserSettings.Invoke("SetFullscreenMode", 1);
-
-
-                
+                float fps = 5;
+                gameUserSettings.Invoke("SetFrameRateLimit", fps);
+                gameUserSettings.Invoke("ApplySettings");
             }
 
 
             //EnableConsole();
 
-            DumpSdk();
+            //DumpSdk();
             
         }
         public void EnableConsole()
@@ -390,10 +388,10 @@ namespace UnrealSharp
                 for (var i = 50u; i < 0x100 && !foundProcessEventOffset; i++)
                 {
                     var s = UnrealEngine.Memory.ReadProcessMemory<IntPtr>(vTable + i * 8);
-                    var sig = (UInt64)UnrealEngine.Memory.FindPattern("40 55 56 57 41 54 41 55 41 56 41 57", s, 0X20);
+                    var sig = (UInt64)UnrealEngine.Memory.FindPattern("40 55 56 57 41 54 41 55 41 56 41 57", s, 0xD);
                     if (sig != 0)
                     {
-                        UEObject.vTableFuncNum = i;     //0x37
+                        UEObject.vTableFuncNum = i;     //0x3F
                         foundProcessEventOffset = true;
                     }
                 }
@@ -856,7 +854,7 @@ namespace UnrealSharp
         public static UInt32 funcNextOffset = 0x20;         //0x20
         public static UInt32 fieldOffset = 0x4C;            //0xBC
         public static UInt32 propertySize = 0x78;           //0xA0
-        public static UInt32 vTableFuncNum = 66;            //0x37
+        public static UInt32 vTableFuncNum = 66;            //0x3F
         public static UInt32 funcFlagsOffset = 0xB0;        //0x100
         public static UInt32 enumArrayOffset = 0x40;
         public static UInt32 enumCountOffset = 0x48;
