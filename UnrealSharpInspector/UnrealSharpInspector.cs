@@ -8,6 +8,7 @@ using System.Threading;
 using System.Windows.Forms;
 using System.Numerics;
 using UnrealSharp;
+using System.Runtime.InteropServices;
 
 namespace UnrealSharpInspector
 {
@@ -74,12 +75,14 @@ namespace UnrealSharpInspector
             {
                 var Level = Levels[levelIndex];
                 actorList.Items.Add(Level.Address + " : " + Level.GetFullPath());
-                var Actors = new UEObject(Level.Address + 0xA8); // todo fix hardcoded 0xA8 offset...
+                var owningWorldOffset = (UInt64)Level.GetFieldOffset(Level.GetFieldAddr("OwningWorld"));
+                var ActorListOffset = owningWorldOffset - (ulong)(UEObject.NewFName ? 0x10 : 0x20);
+                var Actors = new UEObject(Level.Address + ActorListOffset); // todo fix hardcoded 0xA8 offset...
                 for (var i = 0u; i < Actors.Num; i++)
                 {
                     var Actor = Actors[i];
                     if (Actor.Address == 0) continue;
-                    if (Actor.IsA("Class /Script/Engine.Actor"))
+                    if (Actor.IsA("Class /Script/Engine.Actor") && Actor.IsA("Class /Script/Bless.BLNpc"))
                         actorList.Items.Add(Actor.Address + " : " + Actor.GetFullPath());
                 }
             }
@@ -185,14 +188,42 @@ namespace UnrealSharpInspector
             var PlayerController = LocalPlayers[0]["PlayerController"]; if (PlayerController == null) return 1;
             var Player = PlayerController["Player"];
             var AcknowledgedPawn = PlayerController["AcknowledgedPawn"];
-            if (AcknowledgedPawn == null || !AcknowledgedPawn.IsA("Class /Script/Engine.Character")) return 1;
-
+            //if (AcknowledgedPawn == null || !AcknowledgedPawn.IsA("Class /Script/Engine.Character")) return 1;
             var PlayerCameraManager = PlayerController["PlayerCameraManager"];
-            var CameraCache = PlayerCameraManager["CameraCachePrivate"];
-            var CameraPOV = CameraCache["POV"];
-            var CameraLocation = UnrealEngine.Memory.ReadProcessMemory<Vector3>(CameraPOV["Location"].Address);
-            var CameraRotation = UnrealEngine.Memory.ReadProcessMemory<Vector3>(CameraPOV["Rotation"].Address);
-            var CameraFOV = UnrealEngine.Memory.ReadProcessMemory<Single>(CameraPOV["FOV"].Address);
+            var CameraCache = PlayerCameraManager["CameraCache"];
+            var CameraPOV = CameraCache.Address+0x10;
+            var CheatManager = PlayerController["CheatManager"];
+            var CameraLocation = UnrealEngine.Memory.ReadProcessMemory<Vector3>(CameraPOV); //Location
+            var CameraRotation = UnrealEngine.Memory.ReadProcessMemory<Vector3>(CameraPOV+0xC); //Rotation
+            var CameraFOV = UnrealEngine.Memory.ReadProcessMemory<Single>(CameraPOV+0x18); //FOV
+            float maxxx = 48;
+            PlayerController.Invoke("FOV", maxxx);
+
+            //PlayerCameraManager["ViewPitchMax"].SetValue(maxxx);
+            //PlayerCameraManager["ViewYawMax"].SetValue(maxxx);
+            //PlayerCameraManager["ViewRollMax"].SetValue(maxxx);
+            //SetCameraAxisParams
+            //PlayerController.Invoke("DoSkillActionCommand", 55555);
+
+
+            byte[] newFRotator = new byte[12];
+            Vector3 fRotator = new Vector3(2, 3, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(fRotator.X), 0, newFRotator, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(fRotator.Y), 0, newFRotator, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(fRotator.Z), 0, newFRotator, 8, 4);
+            float min = 0;
+            float max = 10;
+
+            //PlayerController.Invoke("EnableCheats");
+            //PlayerController.Invoke("SetCameraYawLimit", min, max);
+
+            //
+            //
+            //PlayerController.Invoke("IsSkillCoolDown", 56797);
+            //
+
+
+            esp.DrawText(CameraRotation.ToString(), new Vector2(20, 200), Color.Red);
             var PlayerRoot = AcknowledgedPawn["RootComponent"];
             var PlayerRelativeLocation = PlayerRoot["RelativeLocation"];
             var PlayerLocation = UnrealEngine.Memory.ReadProcessMemory<Vector3>(PlayerRelativeLocation.Address);
@@ -202,7 +233,9 @@ namespace UnrealSharpInspector
             for (var levelIndex = 0u; levelIndex < Levels.Num; levelIndex++)
             {
                 var Level = Levels[levelIndex];
-                var Actors = new UEObject(Level.Address + 0xA8); // todo fix hardcoded 0xA8 offset...
+                var owningWorldOffset = (UInt64)Level.GetFieldOffset(Level.GetFieldAddr("OwningWorld"));
+                var ActorListOffset = owningWorldOffset - (ulong)(UEObject.NewFName ? 0x10 : 0x20);
+                var Actors = new UEObject(Level.Address + ActorListOffset); // todo fix hardcoded 0xA8 offset...
                 var y = 0;
                 for (var i = 0u; i < Actors.Num; i++)
                 {
@@ -210,6 +243,8 @@ namespace UnrealSharpInspector
                     if (Actor.Address == 0) continue;
                     if (Actor.Address == Player.Address) continue;
                     if (!Actor.IsA("Class /Script/Engine.Actor")) continue;
+                    if (!Actor.IsA("Class /Script/Bless.BLPlayer") && !Actor.IsA("Class /Script/Bless.BLNpc")) continue;
+
                     if (Actor["bActorIsBeingDestroyed"].Value == 1) continue;
                     var RootComponent = Actor["RootComponent"];
                     if (RootComponent == null || RootComponent.Address == 0 || !RootComponent.ClassName.Contains("Component")) continue;
@@ -233,8 +268,30 @@ namespace UnrealSharpInspector
                     }
                 }
                 if (Hotkeys.IsPressed(Keys.F3)) esp.AimAtPos(target);
+                if (Hotkeys.IsPressed(Keys.F4)) 
+                {
+                    /*
+                    var Location = new Vector3(100, 100, 100);
+                    target = esp.WorldToScreen(Location, CameraLocation, CameraRotation, CameraFOV);
+                    float mouseSens = 3;
+                    esp.AimAtPos(target, mouseSens);
+                    */
+                    PlayerController.Invoke("EnableCheats");
+                    CheatManager.Invoke("Teleport");
+                }
+
             }
             return 0;
+        }
+
+        private void btnDumpGnames_Click(object sender, EventArgs e)
+        {
+            UnrealEngine.Instance.DumpGNames();
+        }
+
+        private void btnDumpGObjects_Click(object sender, EventArgs e)
+        {
+            UnrealEngine.Instance.DumpGObjects();
         }
     }
 }

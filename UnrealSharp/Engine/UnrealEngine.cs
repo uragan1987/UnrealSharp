@@ -130,22 +130,19 @@ namespace UnrealSharp
                 GEngine = Memory.ReadProcessMemory<UInt64>(GEnginePattern + offset + 7);
             }
             {
+                var engine = new UEObject(GEngine);
+                GStaticCtor = (UInt64)Memory.FindPattern("4C 89 44 24 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4");
+            }
+            {
                 GWorldPtrPattern = (UInt64)Memory.FindPattern("48 8B 1D ? ? ? ? 48 85 DB 74 3B 41 B0 01");
-                GObjectsPattern = (UInt64)Memory.FindPattern("48 8D 0D ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? 48 8B D6 48 89 B5");
-                //DumpGNames();
                 var offset = UnrealEngine.Memory.ReadProcessMemory<UInt32>(GWorldPtrPattern + 3);
                 GWorldPtr = GWorldPtrPattern + offset + 0x7;
 
+                GObjectsPattern = (UInt64)Memory.FindPattern("48 8D 0D ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? E8 ? ? ? ? 48 8B D6 48 89 B5");
                 offset = Memory.ReadProcessMemory<UInt32>(GObjectsPattern + 3);
                 GObjects = GObjectsPattern + offset + 0x7 + 0x10;
 
                 UpdateUEObject();
-
-
-            }
-            {
-                var engine = new UEObject(GEngine);
-                GStaticCtor = (UInt64)Memory.FindPattern("4C 89 44 24 18 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 ? ? ? ? 48 81 EC ? ? ? ? 48 8B 05 ? ? ? ? 48 33 C4");
             }
             {
                 var world = Memory.ReadProcessMemory<UInt64>(GWorldPtr);
@@ -154,22 +151,63 @@ namespace UnrealSharp
                 var owningWorldOffset = (UInt64)Level.GetFieldOffset(Level.GetFieldAddr("OwningWorld"));
                 // https://github.com/EpicGames/UnrealTournament/blob/3bf4b43c329ce041b4e33c9deb2ca66d78518b29/Engine/Source/Runtime/Engine/Classes/Engine/Level.h#L366
                 // Actors, StreamedLevelOwningWorld, Owning World
-                ActorListOffset = owningWorldOffset - 0x10;
+                //Old Method 4.19
+                // https://github.com/EpicGames/UnrealEngine/blob/4.19/Engine/Source/Runtime/Engine/Classes/Engine/Level.h#L359
+                // Actors, ActorsForGC, StreamedLevelsOwningWorld, OwningWorld
+                ActorListOffset = owningWorldOffset - (ulong)(UEObject.NewFName ? 0x10 : 0x20);
             }
+            /**
             {
                 var engine = new UEObject(GEngine);
                 var gameUserSettings = engine["GameUserSettings"];
-                float fps = 5;
+                float fps = 30;
                 gameUserSettings.Invoke("SetFrameRateLimit", fps);
                 gameUserSettings.Invoke("ApplySettings");
             }
-
-
+            **/
+            {
+                var world = Memory.ReadProcessMemory<UInt64>(GWorldPtr);
+                var World = new UEObject(world);
+                var OwningGameInstance = World["OwningGameInstance"];
+                if (OwningGameInstance != null || OwningGameInstance.IsA("Class /Script/Engine.GameInstance")) 
+                {
+                    var LocalPlayers = OwningGameInstance["LocalPlayers"];
+                    if (LocalPlayers != null) 
+                    {
+                        var PlayerController = LocalPlayers[0]["PlayerController"];
+                        //float NewFOV = 160;
+                        //PlayerController.Invoke("FOV", NewFOV);
+                    }
+                }
+            }
             //EnableConsole();
 
             //DumpSdk();
-            
+
         }
+
+        public (UInt64 ,UInt64)GetObjectAddrFromGObjects(string objName, uint startIndex = 0)
+        {
+            UInt64 result = 0;
+            var entityList = Memory.ReadProcessMemory<UInt64>(GObjects);
+            var count = Memory.ReadProcessMemory<UInt32>(GObjects + 0xC);
+            uint endIndex = 0;
+            for (var i = startIndex; i < count; i++)
+            {
+                var entityAddr = Memory.ReadProcessMemory<UInt64>(entityList + 0x18 * i);
+                if (entityAddr == 0) continue;
+                var classNameIndex = Memory.ReadProcessMemory<Int32>(entityAddr + UEObject.nameOffset);
+                var name = UEObject.GetName(classNameIndex);
+                if (name == objName)
+                {
+                    result = entityAddr;
+                    endIndex = i;
+                    break;
+                }
+            }
+            return (result, endIndex);
+        }
+
         public void EnableConsole()
         {
             var engine = new UEObject(GEngine);
@@ -419,6 +457,24 @@ namespace UnrealSharp
             }
             
         }
+        public void DumpGObjects()
+        {
+            var sb = new StringBuilder();
+            var entityList = Memory.ReadProcessMemory<UInt64>(GObjects);
+            var count = Memory.ReadProcessMemory<UInt32>(GObjects + 0xC);
+            for (var i = 0u; i < count; i++)
+            {
+                var entityAddr = Memory.ReadProcessMemory<UInt64>(entityList + 0x18 * i);
+                var testObj = new UEObject(entityAddr);
+                if (entityAddr == 0) continue;
+                //var classNameIndex = Memory.ReadProcessMemory<Int32>(entityAddr + UEObject.nameOffset);
+                //var name = UEObject.GetName(classNameIndex);
+                //if (name == "") { continue; }
+                sb.AppendLine(String.Format("[{0,10}] {1}", (entityAddr).ToString("X"), testObj.ClassName));
+            }
+            System.IO.Directory.CreateDirectory(Memory.Process.ProcessName);
+            System.IO.File.WriteAllText(Memory.Process.ProcessName + @"\GObjectsDump.txt", sb.ToString());
+        }
         public void DumpGNames()
         {
             var testObj = new UEObject(0);
@@ -631,9 +687,9 @@ namespace UnrealSharp
             addresses.AppendLine("}");
             System.IO.Directory.CreateDirectory(location);
             System.IO.File.WriteAllText(location + @"\Addresses.cs", addresses.ToString());
-            var entityList = Memory.ReadProcessMemory<UInt64>(Memory.BaseAddress + GObjects);
-            var count = Memory.ReadProcessMemory<UInt32>(Memory.BaseAddress + GObjects + 0x14);
-            entityList = Memory.ReadProcessMemory<UInt64>(entityList);
+            var entityList = Memory.ReadProcessMemory<UInt64>(GObjects);
+            var count = Memory.ReadProcessMemory<UInt32>(GObjects + 0xC); 
+            //entityList = Memory.ReadProcessMemory<UInt64>(entityList);
             var packages = new Dictionary<UInt64, List<UInt64>>();
             for (var i = 0u; i < count; i++)
             {
@@ -839,6 +895,7 @@ namespace UnrealSharp
             this.name = name;
         }
     }
+
     public class UEObject
     {
         public static UInt32 objectOuterOffset = 0x20;      //0x20
